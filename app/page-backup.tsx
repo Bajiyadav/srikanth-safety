@@ -85,28 +85,36 @@ export default function Home() {
               <h3 className="text-4xl font-bold text-blue-500 mb-2">
                 10+
               </h3>
-              <p className="text-zinc-400">Years Experience</p>
+              <p className="text-zinc-400">
+                Years Experience
+              </p>
             </div>
 
             <div className="bg-zinc-900 p-8 rounded-2xl border border-zinc-800">
               <h3 className="text-4xl font-bold text-blue-500 mb-2">
                 500+
               </h3>
-              <p className="text-zinc-400">Students Guided</p>
+              <p className="text-zinc-400">
+                Students Guided
+              </p>
             </div>
 
             <div className="bg-zinc-900 p-8 rounded-2xl border border-zinc-800">
               <h3 className="text-4xl font-bold text-blue-500 mb-2">
                 100%
               </h3>
-              <p className="text-zinc-400">Career Support</p>
+              <p className="text-zinc-400">
+                Career Support
+              </p>
             </div>
 
             <div className="bg-zinc-900 p-8 rounded-2xl border border-zinc-800">
               <h3 className="text-4xl font-bold text-blue-500 mb-2">
                 Live
               </h3>
-              <p className="text-zinc-400">Online Classes</p>
+              <p className="text-zinc-400">
+                Online Classes
+              </p>
             </div>
 
           </div>
@@ -128,6 +136,7 @@ export default function Home() {
               <h3 className="text-xl font-semibold mb-4">
                 Petroleum Industry Training
               </h3>
+
               <p className="text-zinc-400">
                 Industry-focused learning designed for
                 petroleum and oil & gas careers.
@@ -138,6 +147,7 @@ export default function Home() {
               <h3 className="text-xl font-semibold mb-4">
                 Industrial Safety Programs
               </h3>
+
               <p className="text-zinc-400">
                 Learn practical safety standards and
                 workplace safety procedures.
@@ -148,6 +158,7 @@ export default function Home() {
               <h3 className="text-xl font-semibold mb-4">
                 Career Guidance
               </h3>
+
               <p className="text-zinc-400">
                 Guidance for freshers and professionals
                 looking to advance their careers.
@@ -158,6 +169,7 @@ export default function Home() {
               <h3 className="text-xl font-semibold mb-4">
                 Interview Preparation
               </h3>
+
               <p className="text-zinc-400">
                 Practical interview support and career
                 readiness training.
@@ -168,58 +180,6 @@ export default function Home() {
 
         </div>
       </section>
-
-      {/* Footer */}
-      <footer className="bg-zinc-950 border-t border-zinc-800 py-16 px-8">
-        <div className="max-w-7xl mx-auto">
-
-          <div className="grid md:grid-cols-3 gap-12">
-
-            <div>
-              <h3 className="text-2xl font-bold mb-4">
-                Srikanth Lecture for Safety
-              </h3>
-
-              <p className="text-zinc-400 leading-7">
-                Professional Petroleum, HSE and Industrial
-                Safety Training designed to help students
-                build successful careers.
-              </p>
-            </div>
-
-            <div>
-              <h3 className="text-xl font-semibold mb-4">
-                Quick Links
-              </h3>
-
-              <ul className="space-y-3 text-zinc-400">
-                <li>Home</li>
-                <li>About Us</li>
-                <li>Courses</li>
-                <li>Contact Us</li>
-              </ul>
-            </div>
-
-            <div>
-              <h3 className="text-xl font-semibold mb-4">
-                Contact
-              </h3>
-
-              <ul className="space-y-3 text-zinc-400">
-                <li>WhatsApp: +91 7569657763</li>
-                <li>Email: bajibaddela@gmail.com</li>
-                <li>Andhra Pradesh, India</li>
-              </ul>
-            </div>
-npm run dev
-          </div>
-
-          <div className="border-t border-zinc-800 mt-12 pt-6 text-center text-zinc-500">
-            © 2026 Srikanth Lecture for Safety. All Rights Reserved.
-          </div>
-
-        </div>
-      </footer>
 
     </main>
   );
