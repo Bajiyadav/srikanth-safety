@@ -43,9 +43,14 @@ export default function Home() {
                 Join Next Batch
               </button>
 
-              <button className="border border-zinc-700 px-6 py-3 rounded-xl">
-                WhatsApp
-              </button>
+              <a
+  href="https://wa.me/917569657763"
+  target="_blank"
+  rel="noopener noreferrer"
+  className="border border-zinc-700 px-6 py-3 rounded-xl"
+>
+  WhatsApp
+</a>
             </div>
           </div>
 
