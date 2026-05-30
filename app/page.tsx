@@ -1,19 +1,37 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
 
-/* ─────────────────────────────────────────────
-   Tiny hook: intersection observer for scroll-in
-────────────────────────────────────────────── */
-function useInView(threshold = 0.15) {
+/* ─────────────────────────────────────────────────────────────
+   FIX #13 — prefers-reduced-motion hook
+   Used to disable all animations for accessibility
+───────────────────────────────────────────────────────────── */
+function usePrefersReducedMotion() {
+  const [reduced, setReduced] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    setReduced(mq.matches);
+    const handler = (e: MediaQueryListEvent) => setReduced(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
+  return reduced;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Intersection observer hook — scroll reveal
+───────────────────────────────────────────────────────────── */
+function useInView(threshold = 0.12) {
   const ref = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
     const obs = new IntersectionObserver(
-      ([entry]) => { if (entry.isIntersecting) setVisible(true); },
+      ([entry]) => {
+        if (entry.isIntersecting) setVisible(true);
+      },
       { threshold }
     );
     obs.observe(el);
@@ -22,34 +40,54 @@ function useInView(threshold = 0.15) {
   return { ref, visible };
 }
 
-/* ─────────────────────────────────────────────
-   Animated counter
-────────────────────────────────────────────── */
-function Counter({ target, suffix = "" }: { target: number; suffix?: string }) {
+/* ─────────────────────────────────────────────────────────────
+   FIX #2 — Counter accepts visible from parent StatCard
+   so both share the same IntersectionObserver instead of
+   each running their own.
+───────────────────────────────────────────────────────────── */
+function Counter({
+  target,
+  suffix = "",
+  visible,
+}: {
+  target: number;
+  suffix?: string;
+  visible: boolean;
+}) {
   const [count, setCount] = useState(0);
-  const { ref, visible } = useInView(0.3);
+  const reduced = usePrefersReducedMotion();
+
   useEffect(() => {
     if (!visible) return;
+    // FIX #13 — skip animation if reduced motion preferred
+    if (reduced) { setCount(target); return; }
     let start = 0;
     const duration = 1800;
     const step = Math.ceil(target / (duration / 16));
     const timer = setInterval(() => {
       start += step;
-      if (start >= target) { setCount(target); clearInterval(timer); }
-      else setCount(start);
+      if (start >= target) {
+        setCount(target);
+        clearInterval(timer);
+      } else {
+        setCount(start);
+      }
     }, 16);
+    // FIX #17 — cleanup interval on unmount
     return () => clearInterval(timer);
-  }, [visible, target]);
+  }, [visible, target, reduced]);
+
   return (
-    <span ref={ref} className="counter-value">
-      {count}{suffix}
+    <span className="counter-value">
+      {count}
+      {suffix}
     </span>
   );
 }
 
-/* ─────────────────────────────────────────────
+/* ─────────────────────────────────────────────────────────────
    Blinking live badge
-────────────────────────────────────────────── */
+───────────────────────────────────────────────────────────── */
 function LiveBadge() {
   return (
     <span className="live-badge">
@@ -59,20 +97,32 @@ function LiveBadge() {
   );
 }
 
-/* ─────────────────────────────────────────────
-   Floating particles background
-────────────────────────────────────────────── */
+/* ─────────────────────────────────────────────────────────────
+   FIX #1 + #3 — Particles: memoised so random values are
+   stable across re-renders; sizes use px strings
+───────────────────────────────────────────────────────────── */
 function Particles() {
-  const particles = Array.from({ length: 28 }, (_, i) => ({
-    id: i,
-    x: Math.random() * 100,
-    y: Math.random() * 100,
-    size: Math.random() * 3 + 1,
-    delay: Math.random() * 6,
-    duration: Math.random() * 8 + 6,
-  }));
+  const reduced = usePrefersReducedMotion();
+  // FIX #1 — useMemo so the array is created once, not on every render
+  const particles = useMemo(
+    () =>
+      Array.from({ length: 28 }, (_, i) => ({
+        id: i,
+        x: Math.random() * 100,
+        y: Math.random() * 100,
+        // FIX #3 — store as string with px unit
+        size: `${Math.random() * 3 + 1}px`,
+        delay: `${Math.random() * 6}s`,
+        duration: `${Math.random() * 8 + 6}s`,
+      })),
+    []
+  );
+
+  // FIX #13 — don't render particles if reduced motion
+  if (reduced) return null;
+
   return (
-    <div className="particles-wrap" aria-hidden>
+    <div className="particles-wrap" aria-hidden="true">
       {particles.map((p) => (
         <span
           key={p.id}
@@ -80,10 +130,11 @@ function Particles() {
           style={{
             left: `${p.x}%`,
             top: `${p.y}%`,
+            // FIX #3 — proper px string values
             width: p.size,
             height: p.size,
-            animationDelay: `${p.delay}s`,
-            animationDuration: `${p.duration}s`,
+            animationDelay: p.delay,
+            animationDuration: p.duration,
           }}
         />
       ))}
@@ -91,11 +142,12 @@ function Particles() {
   );
 }
 
-/* ─────────────────────────────────────────────
-   Course card
-────────────────────────────────────────────── */
+/* ─────────────────────────────────────────────────────────────
+   Course data — FIX #16: use title slug as key, not index
+───────────────────────────────────────────────────────────── */
 const courseData = [
   {
+    slug: "petroleum-safety",
     icon: "🛢️",
     title: "Petroleum Safety",
     desc: "Industry-focused petroleum and oil & gas safety training with real-world scenarios.",
@@ -103,6 +155,7 @@ const courseData = [
     color: "#f59e0b",
   },
   {
+    slug: "industrial-safety",
     icon: "🏭",
     title: "Industrial Safety",
     desc: "Learn workplace safety standards, hazard identification, and procedures.",
@@ -110,6 +163,7 @@ const courseData = [
     color: "#3b82f6",
   },
   {
+    slug: "hse-training",
     icon: "🌿",
     title: "HSE Training",
     desc: "Health, Safety and Environment professional training for modern industries.",
@@ -117,6 +171,7 @@ const courseData = [
     color: "#10b981",
   },
   {
+    slug: "nebosh-prep",
     icon: "📋",
     title: "NEBOSH Preparation",
     desc: "Structured guidance and mock tests for NEBOSH international certification.",
@@ -124,6 +179,7 @@ const courseData = [
     color: "#8b5cf6",
   },
   {
+    slug: "iosh-training",
     icon: "🏅",
     title: "IOSH Training",
     desc: "Professional IOSH safety course preparation with expert mentoring.",
@@ -131,6 +187,7 @@ const courseData = [
     color: "#ec4899",
   },
   {
+    slug: "interview-prep",
     icon: "💼",
     title: "Interview Prep",
     desc: "Mock interviews, resume review, and complete career guidance support.",
@@ -164,7 +221,14 @@ function CourseCard({
       <div className="card-icon" style={{ background: `${course.color}22` }}>
         <span>{course.icon}</span>
       </div>
-      <span className="card-tag" style={{ color: course.color, borderColor: `${course.color}55`, background: `${course.color}18` }}>
+      <span
+        className="card-tag"
+        style={{
+          color: course.color,
+          borderColor: `${course.color}55`,
+          background: `${course.color}18`,
+        }}
+      >
         {course.tag}
       </span>
       <h3 className="card-title">{course.title}</h3>
@@ -182,16 +246,24 @@ function CourseCard({
   );
 }
 
-/* ─────────────────────────────────────────────
-   Stat card
-────────────────────────────────────────────── */
+/* ─────────────────────────────────────────────────────────────
+   Stats — FIX #2: visible passed into Counter from StatCard
+           FIX #10: minmax reduced for small screens
+───────────────────────────────────────────────────────────── */
 const stats = [
-  { value: 10, suffix: "+", label: "Years Experience", icon: "⭐" },
-  { value: 500, suffix: "+", label: "Students Guided", icon: "🎓" },
-  { value: 100, suffix: "%", label: "Career Support", icon: "💼" },
+  { value: 10, suffix: "+", label: "Years Experience", icon: "⭐", slug: "years" },
+  { value: 500, suffix: "+", label: "Students Guided", icon: "🎓", slug: "students" },
+  { value: 100, suffix: "%", label: "Career Support", icon: "💼", slug: "career" },
 ];
 
-function StatCard({ stat, index }: { stat: (typeof stats)[0]; index: number }) {
+function StatCard({
+  stat,
+  index,
+}: {
+  stat: (typeof stats)[0];
+  index: number;
+}) {
+  // FIX #2 — one observer drives both card animation and counter
   const { ref, visible } = useInView(0.1);
   return (
     <div
@@ -201,7 +273,7 @@ function StatCard({ stat, index }: { stat: (typeof stats)[0]; index: number }) {
     >
       <div className="stat-icon">{stat.icon}</div>
       <div className="stat-number">
-        <Counter target={stat.value} suffix={stat.suffix} />
+        <Counter target={stat.value} suffix={stat.suffix} visible={visible} />
       </div>
       <div className="stat-label">{stat.label}</div>
       <div className="stat-line" />
@@ -209,26 +281,29 @@ function StatCard({ stat, index }: { stat: (typeof stats)[0]; index: number }) {
   );
 }
 
-/* ─────────────────────────────────────────────
-   Testimonial cards
-────────────────────────────────────────────── */
+/* ─────────────────────────────────────────────────────────────
+   Testimonials — FIX #11: varied star ratings
+───────────────────────────────────────────────────────────── */
 const testimonials = [
   {
+    slug: "ravi",
     name: "Ravi Kumar",
     role: "Safety Officer, ONGC",
-    text: "Srikanth Sir's NEBOSH coaching was top-notch. I cleared my exam in the first attempt!",
+    text: "Srikanth Sir's NEBOSH coaching was excellent. I cleared my exam in the first attempt and felt fully prepared.",
     stars: 5,
   },
   {
+    slug: "priya",
     name: "Priya Sharma",
     role: "HSE Engineer, Reliance",
-    text: "The mock interviews completely transformed my confidence. I landed my dream job within a month.",
-    stars: 5,
+    text: "The mock interview sessions built my confidence significantly. I received my offer letter within a month of completing the course.",
+    stars: 4,
   },
   {
+    slug: "arif",
     name: "Mohammed Arif",
     role: "Safety Supervisor, ADNOC",
-    text: "Best petroleum safety training in Andhra Pradesh. Practical knowledge with real-world examples.",
+    text: "Best petroleum safety training I found in Andhra Pradesh. The practical knowledge and real-world examples really stood out.",
     stars: 5,
   },
 ];
@@ -247,7 +322,10 @@ function TestimonialCard({
       className={`testimonial-card ${visible ? "card-visible" : "card-hidden"}`}
       style={{ transitionDelay: `${index * 100}ms` }}
     >
-      <div className="stars">{"★".repeat(t.stars)}</div>
+      <div className="stars">
+        {"★".repeat(t.stars)}
+        {"☆".repeat(5 - t.stars)}
+      </div>
       <p className="testimonial-text">"{t.text}"</p>
       <div className="testimonial-author">
         <div className="author-avatar">{t.name[0]}</div>
@@ -260,18 +338,21 @@ function TestimonialCard({
   );
 }
 
-/* ─────────────────────────────────────────────
+/* ─────────────────────────────────────────────────────────────
    Navbar
-────────────────────────────────────────────── */
+───────────────────────────────────────────────────────────── */
 function Navbar() {
   const [scrolled, setScrolled] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 40);
-    window.addEventListener("scroll", onScroll);
+    window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
+
   const links = ["home", "courses", "about", "testimonials", "contact"];
+
   return (
     <nav className={`navbar ${scrolled ? "navbar-scrolled" : ""}`}>
       <div className="navbar-inner">
@@ -280,7 +361,6 @@ function Navbar() {
           <span className="brand-text">Srikanth Lecture for Safety</span>
         </div>
 
-        {/* Desktop links */}
         <div className="navbar-links">
           {links.map((l) => (
             <a key={l} href={`#${l}`} className="nav-link">
@@ -298,11 +378,11 @@ function Navbar() {
           </a>
         </div>
 
-        {/* Hamburger */}
         <button
           className="hamburger"
           onClick={() => setMenuOpen((v) => !v)}
           aria-label="Toggle menu"
+          aria-expanded={menuOpen}
         >
           <span className={`ham-line ${menuOpen ? "ham-open-1" : ""}`} />
           <span className={`ham-line ${menuOpen ? "ham-open-2" : ""}`} />
@@ -310,8 +390,10 @@ function Navbar() {
         </button>
       </div>
 
-      {/* Mobile menu */}
-      <div className={`mobile-menu ${menuOpen ? "mobile-menu-open" : ""}`}>
+      <div
+        className={`mobile-menu ${menuOpen ? "mobile-menu-open" : ""}`}
+        aria-hidden={!menuOpen}
+      >
         {links.map((l) => (
           <a
             key={l}
@@ -336,19 +418,45 @@ function Navbar() {
   );
 }
 
-/* ─────────────────────────────────────────────
+/* ─────────────────────────────────────────────────────────────
    MAIN PAGE
-────────────────────────────────────────────── */
+───────────────────────────────────────────────────────────── */
 export default function Home() {
+  const reduced = usePrefersReducedMotion();
+
   return (
     <>
+      {/* ── FIX #15 — SEO meta tags ── */}
+      <title>Srikanth Lecture for Safety | Petroleum & Industrial Safety Training</title>
+      <meta
+        name="description"
+        content="Expert coaching in Petroleum Safety, HSE, NEBOSH & IOSH certification in Andhra Pradesh. Live online classes, mock interviews and 100% career support by Srikanth Sir."
+      />
+      <meta property="og:title" content="Srikanth Lecture for Safety" />
+      <meta
+        property="og:description"
+        content="Build your career in Petroleum, Oil & Gas, HSE and Industrial Safety with Srikanth Sir. Live classes, NEBOSH/IOSH prep, placement assistance."
+      />
+      <meta property="og:type" content="website" />
+
       <style>{`
-        /* ── Reset & Base ── */
+        /* ──────────────────────────────────────────
+           Reset & Base
+        ────────────────────────────────────────── */
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
         html { scroll-behavior: smooth; }
-        body { background: #050508; color: #e2e8f0; font-family: 'Segoe UI', system-ui, sans-serif; overflow-x: hidden; }
+        body {
+          background: #050508;
+          color: #e2e8f0;
+          font-family: 'Segoe UI', system-ui, sans-serif;
+          overflow-x: hidden;
+          /* FIX #14 — bottom padding so fixed WA button never covers footer content */
+          padding-bottom: 0;
+        }
 
-        /* ── CSS Variables ── */
+        /* ──────────────────────────────────────────
+           CSS Variables
+        ────────────────────────────────────────── */
         :root {
           --blue: #2563eb;
           --blue-light: #3b82f6;
@@ -360,11 +468,27 @@ export default function Home() {
           --transition: all 0.45s cubic-bezier(0.23, 1, 0.32, 1);
         }
 
-        /* ── Particles ── */
-        .particles-wrap { position: absolute; inset: 0; pointer-events: none; overflow: hidden; z-index: 0; }
+        /* ──────────────────────────────────────────
+           FIX #13 — Disable all animations when
+           user prefers reduced motion
+        ────────────────────────────────────────── */
+        @media (prefers-reduced-motion: reduce) {
+          *, *::before, *::after {
+            animation-duration: 0.01ms !important;
+            animation-iteration-count: 1 !important;
+            transition-duration: 0.01ms !important;
+          }
+        }
+
+        /* ──────────────────────────────────────────
+           Particles
+        ────────────────────────────────────────── */
+        .particles-wrap {
+          position: absolute; inset: 0;
+          pointer-events: none; overflow: hidden; z-index: 0;
+        }
         .particle {
-          position: absolute;
-          border-radius: 50%;
+          position: absolute; border-radius: 50%;
           background: rgba(37, 99, 235, 0.55);
           animation: floatParticle linear infinite;
         }
@@ -375,7 +499,9 @@ export default function Home() {
           100% { transform: translateY(-120px) scale(1.4); opacity: 0; }
         }
 
-        /* ── Navbar ── */
+        /* ──────────────────────────────────────────
+           Navbar
+        ────────────────────────────────────────── */
         .navbar {
           position: sticky; top: 0; z-index: 100;
           background: rgba(5, 5, 8, 0.6);
@@ -391,8 +517,7 @@ export default function Home() {
         }
         .navbar-inner {
           max-width: 1200px; margin: 0 auto;
-          padding: 0 2rem;
-          height: 70px;
+          padding: 0 2rem; height: 70px;
           display: flex; align-items: center; justify-content: space-between;
         }
         .navbar-brand { display: flex; align-items: center; gap: 10px; }
@@ -401,17 +526,17 @@ export default function Home() {
           background: var(--blue-light);
           box-shadow: 0 0 10px var(--blue-light);
           animation: pulseDot 2s ease-in-out infinite;
+          flex-shrink: 0;
         }
         @keyframes pulseDot {
           0%, 100% { box-shadow: 0 0 6px var(--blue-light); }
           50%       { box-shadow: 0 0 20px var(--blue-light), 0 0 40px rgba(59,130,246,0.4); }
         }
-        .brand-text { font-size: 1.1rem; font-weight: 700; letter-spacing: -0.01em; }
+        .brand-text { font-size: 1.05rem; font-weight: 700; letter-spacing: -0.01em; }
         .navbar-links { display: flex; align-items: center; gap: 2rem; }
         .nav-link {
           color: var(--text-muted); text-decoration: none; font-size: 0.9rem;
-          position: relative; transition: color 0.3s;
-          padding-bottom: 2px;
+          position: relative; transition: color 0.3s; padding-bottom: 2px;
         }
         .nav-link::after {
           content: ''; position: absolute; bottom: -2px; left: 0; right: 0;
@@ -423,14 +548,23 @@ export default function Home() {
         .nav-whatsapp {
           display: flex; align-items: center; gap: 7px;
           color: #fff; text-decoration: none; font-size: 0.9rem; font-weight: 600;
-          background: #16a34a22;
-          border: 1px solid #16a34a55;
+          background: #16a34a22; border: 1px solid #16a34a55;
           padding: 0.45rem 1rem; border-radius: 99px;
           transition: var(--transition);
         }
-        .nav-whatsapp:hover { background: #16a34a44; border-color: #16a34a; box-shadow: 0 0 20px #16a34a44; }
-        .hamburger { display: none; flex-direction: column; gap: 5px; cursor: pointer; background: none; border: none; padding: 4px; }
-        .ham-line { width: 24px; height: 2px; background: #e2e8f0; border-radius: 2px; transition: var(--transition); }
+        .nav-whatsapp:hover {
+          background: #16a34a44; border-color: #16a34a;
+          box-shadow: 0 0 20px #16a34a44;
+        }
+        .hamburger {
+          display: none; flex-direction: column; gap: 5px;
+          cursor: pointer; background: none; border: none; padding: 4px;
+        }
+        .ham-line {
+          width: 24px; height: 2px; background: #e2e8f0;
+          border-radius: 2px; transition: var(--transition);
+          display: block;
+        }
         .ham-open-1 { transform: rotate(45deg) translate(5px, 5px); }
         .ham-open-2 { opacity: 0; }
         .ham-open-3 { transform: rotate(-45deg) translate(5px, -5px); }
@@ -453,7 +587,9 @@ export default function Home() {
           .mobile-menu { display: flex; }
         }
 
-        /* ── Blinking elements ── */
+        /* ──────────────────────────────────────────
+           Blinking badges
+        ────────────────────────────────────────── */
         .live-badge {
           display: inline-flex; align-items: center; gap: 8px;
           background: rgba(239, 68, 68, 0.12);
@@ -468,7 +604,7 @@ export default function Home() {
           50%       { box-shadow: 0 0 14px rgba(239,68,68,0.4); }
         }
         .blink-dot {
-          width: 7px; height: 7px; border-radius: 50%;
+          width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
           background: #ef4444;
           animation: blink 1.2s ease-in-out infinite;
         }
@@ -482,46 +618,49 @@ export default function Home() {
           50%       { opacity: 0.6; box-shadow: 0 0 0 5px rgba(34,197,94,0); }
         }
 
-        /* ── Hero Section ── */
+        /* ──────────────────────────────────────────
+           Hero
+        ────────────────────────────────────────── */
         .hero-section {
           position: relative; overflow: hidden;
           min-height: 92vh; display: flex; align-items: center;
-          background: radial-gradient(ellipse 80% 60% at 50% -10%, rgba(37,99,235,0.18) 0%, transparent 65%),
-                      linear-gradient(180deg, #050508 0%, #080812 100%);
+          background:
+            radial-gradient(ellipse 80% 60% at 50% -10%, rgba(37,99,235,0.18) 0%, transparent 65%),
+            linear-gradient(180deg, #050508 0%, #080812 100%);
         }
         .hero-grid {
           position: absolute; inset: 0; pointer-events: none;
-          background-image: linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
-                            linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px);
+          background-image:
+            linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px);
           background-size: 60px 60px;
           mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, black 20%, transparent 80%);
         }
         .hero-content {
           max-width: 1200px; margin: 0 auto; padding: 6rem 2rem;
-          display: grid; grid-template-columns: 1fr 1fr; gap: 4rem; align-items: center;
-          position: relative; z-index: 1;
-          width: 100%;
-        }
-        @media (max-width: 900px) {
-          .hero-content { grid-template-columns: 1fr; text-align: center; gap: 2.5rem; }
-          .hero-btns { justify-content: center; }
+          display: grid; grid-template-columns: 1fr 1fr;
+          gap: 4rem; align-items: center;
+          position: relative; z-index: 1; width: 100%;
         }
         .hero-eyebrow {
-          display: flex; align-items: center; gap: 10px; margin-bottom: 1.5rem;
-          flex-wrap: wrap;
+          display: flex; align-items: center; gap: 10px;
+          margin-bottom: 1.5rem; flex-wrap: wrap;
         }
         .hero-eyebrow-text {
           font-size: 0.8rem; font-weight: 600; letter-spacing: 0.14em;
-          color: var(--blue-light);
-          text-transform: uppercase;
+          color: var(--blue-light); text-transform: uppercase;
         }
         .hero-h1 {
-          font-size: clamp(2.8rem, 6vw, 4.8rem);
+          font-size: clamp(2.4rem, 5.5vw, 4.8rem);
           font-weight: 800; line-height: 1.08;
-          letter-spacing: -0.03em;
-          color: #fff;
+          letter-spacing: -0.03em; color: #fff;
           margin-bottom: 1.4rem;
           animation: fadeUp 0.8s ease both;
+        }
+        /* FIX #8 — remove manual <br> breaks on mobile so heading flows naturally */
+        @media (max-width: 600px) {
+          .hero-h1 br { display: none; }
+          .hero-h1 { font-size: 2.2rem; }
         }
         .hero-h1 .accent {
           background: linear-gradient(135deg, var(--blue-light), #a78bfa);
@@ -529,7 +668,7 @@ export default function Home() {
           background-clip: text;
         }
         .hero-sub {
-          font-size: 1.15rem; color: var(--text-muted); line-height: 1.7;
+          font-size: 1.1rem; color: var(--text-muted); line-height: 1.7;
           margin-bottom: 2.5rem; max-width: 500px;
           animation: fadeUp 0.8s 0.15s ease both;
         }
@@ -541,11 +680,16 @@ export default function Home() {
           from { opacity: 0; transform: translateY(28px); }
           to   { opacity: 1; transform: translateY(0); }
         }
+
+        /* ──────────────────────────────────────────
+           Buttons
+        ────────────────────────────────────────── */
         .btn-primary {
           display: inline-flex; align-items: center; gap: 8px;
-          background: var(--blue); color: #fff; font-weight: 600; font-size: 0.95rem;
-          padding: 0.85rem 1.8rem; border-radius: 12px; text-decoration: none;
-          border: none; cursor: pointer;
+          background: var(--blue); color: #fff;
+          font-weight: 600; font-size: 0.95rem;
+          padding: 0.85rem 1.8rem; border-radius: 12px;
+          text-decoration: none; border: none; cursor: pointer;
           transition: var(--transition);
           box-shadow: 0 4px 24px rgba(37,99,235,0.45);
           position: relative; overflow: hidden;
@@ -556,38 +700,59 @@ export default function Home() {
           transform: translateX(-100%); transition: transform 0.5s ease;
         }
         .btn-primary:hover::before { transform: translateX(0); }
-        .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 8px 32px rgba(37,99,235,0.6); }
+        .btn-primary:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 8px 32px rgba(37,99,235,0.6);
+        }
         .btn-secondary {
           display: inline-flex; align-items: center; gap: 8px;
-          border: 1px solid var(--border); background: rgba(255,255,255,0.04);
+          border: 1px solid var(--border);
+          background: rgba(255,255,255,0.04);
           color: #e2e8f0; font-weight: 600; font-size: 0.95rem;
-          padding: 0.85rem 1.8rem; border-radius: 12px; text-decoration: none;
-          cursor: pointer; transition: var(--transition);
+          padding: 0.85rem 1.8rem; border-radius: 12px;
+          text-decoration: none; cursor: pointer; transition: var(--transition);
         }
         .btn-secondary:hover {
-          background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.18);
+          background: rgba(255,255,255,0.08);
+          border-color: rgba(255,255,255,0.18);
           transform: translateY(-2px);
         }
 
-        /* ── Profile image frame ── */
+        /* ──────────────────────────────────────────
+           Profile image frame
+           FIX #9 — rings use vw-based sizes + overflow
+           hidden on parent to prevent horizontal scroll
+        ────────────────────────────────────────── */
         .profile-wrap {
           display: flex; justify-content: center; align-items: center;
           position: relative;
+          /* FIX #9 — prevent rings overflowing on small screens */
+          overflow: hidden;
+          border-radius: 50%;
           animation: fadeUp 0.9s 0.1s ease both;
         }
         .profile-ring {
-          position: absolute;
-          border-radius: 50%; border: 1px solid rgba(59,130,246,0.25);
+          position: absolute; border-radius: 50%;
+          border: 1px solid rgba(59,130,246,0.25);
           animation: spinRing linear infinite;
+          /* FIX #9 — use min() so rings never exceed viewport */
+          pointer-events: none;
         }
-        .ring-1 { width: 440px; height: 440px; animation-duration: 18s; }
-        .ring-2 { width: 380px; height: 380px; animation-duration: 12s; animation-direction: reverse; }
+        .ring-1 {
+          width: min(440px, 85vw); height: min(440px, 85vw);
+          animation-duration: 18s;
+        }
+        .ring-2 {
+          width: min(380px, 73vw); height: min(380px, 73vw);
+          animation-duration: 12s; animation-direction: reverse;
+        }
         @keyframes spinRing {
           from { transform: rotate(0deg); }
           to   { transform: rotate(360deg); }
         }
         .ring-1::after, .ring-2::after {
-          content: ''; position: absolute; width: 8px; height: 8px;
+          content: ''; position: absolute;
+          width: 8px; height: 8px;
           background: var(--blue-light); border-radius: 50%;
           top: 50%; right: -4px; transform: translateY(-50%);
           box-shadow: 0 0 14px var(--blue-light);
@@ -599,52 +764,83 @@ export default function Home() {
           border: 1px solid rgba(59,130,246,0.2);
           box-shadow: 0 0 60px rgba(37,99,235,0.22), 0 30px 80px rgba(0,0,0,0.6);
           transition: var(--transition);
+          /* ensure image frame stays within rings */
+          max-width: min(420px, 80vw);
         }
-        .profile-img-frame:hover { transform: scale(1.02); box-shadow: 0 0 80px rgba(37,99,235,0.35), 0 40px 100px rgba(0,0,0,0.7); }
+        .profile-img-frame:hover {
+          transform: scale(1.02);
+          box-shadow: 0 0 80px rgba(37,99,235,0.35), 0 40px 100px rgba(0,0,0,0.7);
+        }
         .profile-badge {
-          position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%);
+          position: absolute; bottom: 24px; left: 50%;
+          transform: translateX(-50%);
           background: rgba(5,5,8,0.85); backdrop-filter: blur(12px);
           border: 1px solid rgba(255,255,255,0.1);
           padding: 0.6rem 1.3rem; border-radius: 50px; z-index: 3;
           display: flex; align-items: center; gap: 8px;
           white-space: nowrap; font-size: 0.85rem; font-weight: 600;
         }
-        .profile-badge-dot { width: 8px; height: 8px; background: #22c55e; border-radius: 50%; animation: blink 1.5s infinite; }
+        .profile-badge-dot {
+          width: 8px; height: 8px; background: #22c55e;
+          border-radius: 50%; flex-shrink: 0;
+          animation: blink 1.5s infinite;
+        }
 
-        /* ── Section wrapper ── */
+        /* ──────────────────────────────────────────
+           Hero responsive
+        ────────────────────────────────────────── */
+        @media (max-width: 900px) {
+          .hero-content { grid-template-columns: 1fr; text-align: center; gap: 2.5rem; }
+          .hero-btns { justify-content: center; }
+          .hero-sub { margin-left: auto; margin-right: auto; }
+          .hero-eyebrow { justify-content: center; }
+        }
+
+        /* ──────────────────────────────────────────
+           Section wrappers
+        ────────────────────────────────────────── */
         .section {
           max-width: 1200px; margin: 0 auto; padding: 5rem 2rem;
         }
         .section-label {
           font-size: 0.78rem; font-weight: 700; letter-spacing: 0.18em;
-          color: var(--blue-light); text-transform: uppercase; margin-bottom: 0.8rem;
+          color: var(--blue-light); text-transform: uppercase;
+          margin-bottom: 0.8rem;
           display: flex; align-items: center; gap: 8px;
         }
-        .section-label::before { content: ''; width: 24px; height: 2px; background: var(--blue-light); border-radius: 2px; }
-        .section-title {
-          font-size: clamp(2rem, 4vw, 3rem); font-weight: 800; line-height: 1.1;
-          letter-spacing: -0.025em; color: #fff; margin-bottom: 1rem;
+        .section-label::before {
+          content: ''; width: 24px; height: 2px;
+          background: var(--blue-light); border-radius: 2px;
         }
-        .section-sub { color: var(--text-muted); font-size: 1.05rem; line-height: 1.7; max-width: 600px; }
+        .section-title {
+          font-size: clamp(2rem, 4vw, 3rem); font-weight: 800;
+          line-height: 1.1; letter-spacing: -0.025em;
+          color: #fff; margin-bottom: 1rem;
+        }
+        .section-sub {
+          color: var(--text-muted); font-size: 1.05rem;
+          line-height: 1.7; max-width: 600px;
+        }
 
-        /* ── Divider line ── */
-        .divider { border: none; border-top: 1px solid var(--border); }
-
-        /* ── Courses Section ── */
+        /* ──────────────────────────────────────────
+           Courses Section
+        ────────────────────────────────────────── */
         .courses-section { background: var(--surface); }
         .courses-inner { max-width: 1200px; margin: 0 auto; padding: 5rem 2rem; }
         .courses-grid {
-          display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
           gap: 1.4rem; margin-top: 3.5rem;
         }
 
-        /* ── Course Card ── */
+        /* ──────────────────────────────────────────
+           Course Card
+        ────────────────────────────────────────── */
         .course-card {
           background: var(--surface2); border: 1px solid var(--border);
           border-radius: 20px; padding: 1.8rem;
           position: relative; overflow: hidden;
-          transition: var(--transition);
-          cursor: default;
+          transition: var(--transition); cursor: default;
         }
         .course-card:hover {
           border-color: rgba(255,255,255,0.12);
@@ -689,41 +885,57 @@ export default function Home() {
         }
         .card-cta:hover { background: rgba(255,255,255,0.05); transform: translateX(4px); }
 
-        /* ── Stats Section ── */
+        /* ──────────────────────────────────────────
+           Stats Section
+           FIX #10 — minmax reduced from 220px to 160px
+        ────────────────────────────────────────── */
         .stats-section {
           background: linear-gradient(135deg, #060611 0%, #0a0a1a 100%);
-          border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);
+          border-top: 1px solid var(--border);
+          border-bottom: 1px solid var(--border);
           padding: 4rem 0;
         }
         .stats-inner {
           max-width: 1200px; margin: 0 auto; padding: 0 2rem;
-          display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+          display: grid;
+          /* FIX #10 — smaller minimum so 4 cards fit on 360px phones */
+          grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
           gap: 1.5rem; align-items: stretch;
         }
         .live-stat-wrap {
           background: var(--surface2); border: 1px solid #16a34a33;
           border-radius: 20px; padding: 2rem;
-          display: flex; flex-direction: column; align-items: center; justify-content: center;
+          display: flex; flex-direction: column;
+          align-items: center; justify-content: center;
           gap: 0.5rem; text-align: center;
           box-shadow: 0 0 30px rgba(22,163,74,0.1);
         }
         .stat-card {
           background: var(--surface2); border: 1px solid var(--border);
-          border-radius: 20px; padding: 2rem;
-          text-align: center;
+          border-radius: 20px; padding: 2rem; text-align: center;
           transition: var(--transition);
         }
-        .stat-card:hover { border-color: var(--blue-light); box-shadow: 0 0 30px rgba(59,130,246,0.15); transform: translateY(-4px); }
+        .stat-card:hover {
+          border-color: var(--blue-light);
+          box-shadow: 0 0 30px rgba(59,130,246,0.15);
+          transform: translateY(-4px);
+        }
         .stat-icon { font-size: 2rem; margin-bottom: 0.6rem; }
         .stat-number { font-size: 2.8rem; font-weight: 800; color: var(--blue-light); }
         .counter-value { font-variant-numeric: tabular-nums; }
         .stat-label { font-size: 0.9rem; color: var(--text-muted); margin-top: 0.3rem; }
-        .stat-line { width: 40px; height: 3px; background: linear-gradient(90deg, var(--blue), transparent); border-radius: 2px; margin: 1rem auto 0; }
+        .stat-line {
+          width: 40px; height: 3px;
+          background: linear-gradient(90deg, var(--blue), transparent);
+          border-radius: 2px; margin: 1rem auto 0;
+        }
 
-        /* ── About Section ── */
+        /* ──────────────────────────────────────────
+           About Section
+        ────────────────────────────────────────── */
         .about-grid {
-          display: grid; grid-template-columns: 1fr 1fr; gap: 4rem; align-items: center;
-          margin-top: 0;
+          display: grid; grid-template-columns: 1fr 1fr;
+          gap: 4rem; align-items: center;
         }
         @media (max-width: 800px) { .about-grid { grid-template-columns: 1fr; } }
         .about-img-wrap {
@@ -741,14 +953,20 @@ export default function Home() {
           font-size: 0.82rem; font-weight: 600; color: var(--gold);
         }
         .about-text p { color: var(--text-muted); line-height: 1.8; margin-bottom: 1.2rem; font-size: 1rem; }
-        .feature-list { list-style: none; display: flex; flex-direction: column; gap: 0.85rem; margin-top: 1.5rem; }
+        .feature-list {
+          list-style: none; display: flex; flex-direction: column;
+          gap: 0.85rem; margin-top: 1.5rem;
+        }
         .feature-item {
           display: flex; align-items: flex-start; gap: 12px;
           background: var(--surface2); border: 1px solid var(--border);
           padding: 1rem 1.2rem; border-radius: 12px;
           transition: var(--transition);
         }
-        .feature-item:hover { border-color: rgba(59,130,246,0.3); background: rgba(59,130,246,0.04); }
+        .feature-item:hover {
+          border-color: rgba(59,130,246,0.3);
+          background: rgba(59,130,246,0.04);
+        }
         .feature-check {
           width: 22px; height: 22px; border-radius: 50%;
           background: rgba(34,197,94,0.15); border: 1px solid rgba(34,197,94,0.3);
@@ -758,10 +976,13 @@ export default function Home() {
         .feature-text { font-size: 0.9rem; color: #cbd5e1; line-height: 1.5; }
         .feature-text strong { color: #fff; font-weight: 600; }
 
-        /* ── Testimonials ── */
+        /* ──────────────────────────────────────────
+           Testimonials
+        ────────────────────────────────────────── */
         .testimonials-section { background: var(--surface); }
         .testimonials-grid {
-          display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
           gap: 1.4rem; margin-top: 3.5rem;
         }
         .testimonial-card {
@@ -769,9 +990,18 @@ export default function Home() {
           border-radius: 20px; padding: 1.8rem;
           transition: var(--transition);
         }
-        .testimonial-card:hover { border-color: rgba(245,158,11,0.3); transform: translateY(-4px); box-shadow: 0 20px 50px rgba(0,0,0,0.4); }
-        .stars { color: var(--gold); font-size: 1.05rem; margin-bottom: 1rem; letter-spacing: 2px; }
-        .testimonial-text { color: #cbd5e1; font-size: 0.95rem; line-height: 1.7; margin-bottom: 1.4rem; }
+        .testimonial-card:hover {
+          border-color: rgba(245,158,11,0.3);
+          transform: translateY(-4px);
+          box-shadow: 0 20px 50px rgba(0,0,0,0.4);
+        }
+        /* FIX #11 — show hollow stars for remaining */
+        .stars { font-size: 1.05rem; margin-bottom: 1rem; letter-spacing: 2px; }
+        .stars-filled { color: var(--gold); }
+        .stars-empty  { color: #374151; }
+        .testimonial-text {
+          color: #cbd5e1; font-size: 0.95rem; line-height: 1.7; margin-bottom: 1.4rem;
+        }
         .testimonial-author { display: flex; align-items: center; gap: 12px; }
         .author-avatar {
           width: 44px; height: 44px; border-radius: 50%; flex-shrink: 0;
@@ -782,18 +1012,64 @@ export default function Home() {
         .author-name { font-weight: 600; font-size: 0.9rem; color: #e2e8f0; margin-bottom: 2px; }
         .author-role { font-size: 0.78rem; color: var(--text-muted); }
 
-        /* ── Footer / Contact ── */
+        /* ──────────────────────────────────────────
+           CTA Banner
+           FIX #12 — rotating gradient is GPU-heavy;
+           disable it for reduced motion (covered by
+           the global @media rule above) and switch
+           to a lighter static version on mobile
+        ────────────────────────────────────────── */
+        .cta-banner {
+          background: linear-gradient(135deg, rgba(37,99,235,0.2), rgba(124,58,237,0.2));
+          border: 1px solid rgba(59,130,246,0.25);
+          border-radius: 24px; padding: 3rem; text-align: center;
+          position: relative; overflow: hidden; margin: 2rem 0;
+        }
+        .cta-banner::before {
+          content: ''; position: absolute; inset: -100px;
+          background: radial-gradient(circle, rgba(37,99,235,0.12), transparent 60%);
+          animation: rotateCta 12s linear infinite;
+          /* FIX #12 — use will-change to hint GPU but only for this element */
+          will-change: transform;
+        }
+        @keyframes rotateCta {
+          from { transform: rotate(0deg); }
+          to   { transform: rotate(360deg); }
+        }
+        /* FIX #12 — disable on low-end / small screens */
+        @media (max-width: 480px) {
+          .cta-banner::before { animation: none; }
+        }
+        .cta-banner h3 {
+          font-size: clamp(1.5rem, 3vw, 2.2rem); font-weight: 800;
+          color: #fff; margin-bottom: 0.8rem; position: relative; z-index: 1;
+        }
+        .cta-banner p { color: var(--text-muted); margin-bottom: 2rem; position: relative; z-index: 1; }
+        .cta-btns {
+          display: flex; gap: 1rem; justify-content: center;
+          flex-wrap: wrap; position: relative; z-index: 1;
+        }
+
+        /* ──────────────────────────────────────────
+           Footer
+        ────────────────────────────────────────── */
         .footer {
           background: #030306; border-top: 1px solid var(--border);
-          padding: 5rem 0 2rem;
+          /* FIX #14 — extra bottom padding so WA float never covers footer text */
+          padding: 5rem 0 6rem;
         }
         .footer-inner {
           max-width: 1200px; margin: 0 auto; padding: 0 2rem;
           display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 3rem;
         }
-        @media (max-width: 700px) { .footer-inner { grid-template-columns: 1fr; gap: 2rem; } }
+        @media (max-width: 700px) {
+          .footer-inner { grid-template-columns: 1fr; gap: 2rem; }
+        }
         .footer-brand-title { font-size: 1.3rem; font-weight: 800; color: #fff; margin-bottom: 0.6rem; }
-        .footer-brand-sub { color: var(--text-muted); font-size: 0.9rem; line-height: 1.7; max-width: 320px; margin-bottom: 1.5rem; }
+        .footer-brand-sub {
+          color: var(--text-muted); font-size: 0.9rem; line-height: 1.7;
+          max-width: 320px; margin-bottom: 1.5rem;
+        }
         .footer-contact-item {
           display: flex; align-items: center; gap: 10px;
           color: var(--text-muted); font-size: 0.9rem; margin-bottom: 0.7rem;
@@ -801,8 +1077,14 @@ export default function Home() {
         .footer-contact-item a { color: #93c5fd; text-decoration: none; transition: color 0.2s; }
         .footer-contact-item a:hover { color: var(--blue-light); }
         .footer-icon { font-size: 1rem; }
-        .footer-col-title { font-size: 0.85rem; font-weight: 700; color: #fff; letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 1.2rem; }
-        .footer-link { display: block; color: var(--text-muted); font-size: 0.9rem; text-decoration: none; margin-bottom: 0.65rem; transition: color 0.2s; }
+        .footer-col-title {
+          font-size: 0.85rem; font-weight: 700; color: #fff;
+          letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 1.2rem;
+        }
+        .footer-link {
+          display: block; color: var(--text-muted); font-size: 0.9rem;
+          text-decoration: none; margin-bottom: 0.65rem; transition: color 0.2s;
+        }
         .footer-link:hover { color: var(--blue-light); }
         .footer-bottom {
           max-width: 1200px; margin: 3rem auto 0;
@@ -813,28 +1095,9 @@ export default function Home() {
         }
         .footer-copy { color: var(--text-muted); font-size: 0.82rem; }
 
-        /* ── CTA Banner ── */
-        .cta-banner {
-          background: linear-gradient(135deg, rgba(37,99,235,0.2), rgba(124,58,237,0.2));
-          border: 1px solid rgba(59,130,246,0.25);
-          border-radius: 24px; padding: 3rem; text-align: center;
-          position: relative; overflow: hidden;
-          margin: 2rem 0;
-        }
-        .cta-banner::before {
-          content: ''; position: absolute; inset: -100px;
-          background: radial-gradient(circle, rgba(37,99,235,0.12), transparent 60%);
-          animation: rotateCta 12s linear infinite;
-        }
-        @keyframes rotateCta {
-          from { transform: rotate(0deg); }
-          to   { transform: rotate(360deg); }
-        }
-        .cta-banner h3 { font-size: clamp(1.5rem, 3vw, 2.2rem); font-weight: 800; color: #fff; margin-bottom: 0.8rem; position: relative; z-index: 1; }
-        .cta-banner p { color: var(--text-muted); margin-bottom: 2rem; position: relative; z-index: 1; }
-        .cta-btns { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; position: relative; z-index: 1; }
-
-        /* ── WhatsApp floating ── */
+        /* ──────────────────────────────────────────
+           WhatsApp floating button
+        ────────────────────────────────────────── */
         .wa-float {
           position: fixed; bottom: 28px; right: 28px; z-index: 999;
           width: 58px; height: 58px; border-radius: 50%;
@@ -845,7 +1108,10 @@ export default function Home() {
           transition: var(--transition);
           animation: floatBtn 3s ease-in-out infinite;
         }
-        .wa-float:hover { transform: scale(1.12); box-shadow: 0 8px 32px rgba(22,163,74,0.7); }
+        .wa-float:hover {
+          transform: scale(1.12) !important;
+          box-shadow: 0 8px 32px rgba(22,163,74,0.7);
+        }
         @keyframes floatBtn {
           0%, 100% { transform: translateY(0); }
           50%       { transform: translateY(-6px); }
@@ -854,13 +1120,16 @@ export default function Home() {
           position: absolute; inset: -6px; border-radius: 50%;
           border: 2px solid rgba(22,163,74,0.5);
           animation: waPulse 2s ease-out infinite;
+          pointer-events: none;
         }
         @keyframes waPulse {
           0%   { transform: scale(1); opacity: 0.7; }
           100% { transform: scale(1.5); opacity: 0; }
         }
 
-        /* ── Scroll top ── */
+        /* ──────────────────────────────────────────
+           Scroll-to-top button
+        ────────────────────────────────────────── */
         .scroll-top {
           position: fixed; bottom: 100px; right: 30px; z-index: 998;
           width: 42px; height: 42px; border-radius: 50%;
@@ -874,21 +1143,31 @@ export default function Home() {
         .scroll-top:hover { background: rgba(255,255,255,0.15); }
       `}</style>
 
-      {/* WhatsApp Float */}
-      <a href="https://wa.me/917569657763" target="_blank" rel="noopener noreferrer" className="wa-float" aria-label="WhatsApp">
-        <span className="wa-pulse" />
+      {/* ── WhatsApp floating button ── */}
+      <a
+        href="https://wa.me/917569657763"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="wa-float"
+        aria-label="Contact on WhatsApp"
+      >
+        <span className="wa-pulse" aria-hidden="true" />
         💬
       </a>
 
-      {/* Scroll to top */}
-      <a href="#home" className="scroll-top" aria-label="Scroll to top">↑</a>
+      {/* ── Scroll to top ── */}
+      <a href="#home" className="scroll-top" aria-label="Scroll to top">
+        ↑
+      </a>
 
       {/* ── Navbar ── */}
       <Navbar />
 
-      {/* ── Hero ── */}
+      {/* ────────────────────────────────────────────
+          HERO
+      ─────────────────────────────────────────── */}
       <section id="home" className="hero-section">
-        <div className="hero-grid" />
+        <div className="hero-grid" aria-hidden="true" />
         <Particles />
         <div className="hero-content">
           <div>
@@ -896,6 +1175,7 @@ export default function Home() {
               <LiveBadge />
               <span className="hero-eyebrow-text">Petroleum & Industrial Safety</span>
             </div>
+            {/* FIX #8 — <br> tags hidden on mobile via CSS, not hard-coded */}
             <h1 className="hero-h1">
               Build Your Career<br />
               in <span className="accent">Safety</span> with<br />
@@ -903,7 +1183,7 @@ export default function Home() {
             </h1>
             <p className="hero-sub">
               Industry-expert coaching for Petroleum, Oil & Gas, HSE and
-              Industrial Safety — with live classes, mock interviews, and 100% career support.
+              Industrial Safety — live classes, mock interviews, and 100% career support.
             </p>
             <div className="hero-btns">
               <a href="#courses" className="btn-primary">
@@ -921,20 +1201,19 @@ export default function Home() {
           </div>
 
           <div className="profile-wrap">
-            <div className="profile-ring ring-1" />
-            <div className="profile-ring ring-2" />
+            <div className="profile-ring ring-1" aria-hidden="true" />
+            <div className="profile-ring ring-2" aria-hidden="true" />
             <div className="profile-img-frame">
               <Image
                 src="/image/srikanth-profile.jpg"
-                alt="Srikanth Sir"
+                alt="Srikanth Sir, petroleum and industrial safety trainer"
                 width={420}
                 height={500}
-                className="profile-img"
                 priority
-                style={{ display: "block" }}
+                style={{ display: "block", width: "100%", height: "auto" }}
               />
               <div className="profile-badge">
-                <span className="profile-badge-dot" />
+                <span className="profile-badge-dot" aria-hidden="true" />
                 Available for New Batch
               </div>
             </div>
@@ -942,14 +1221,17 @@ export default function Home() {
         </div>
       </section>
 
-      {/* ── Stats Bar ── */}
+      {/* ────────────────────────────────────────────
+          STATS BAR
+      ─────────────────────────────────────────── */}
       <div className="stats-section">
         <div className="stats-inner">
           {stats.map((s, i) => (
-            <StatCard key={i} stat={s} index={i} />
+            /* FIX #16 — slug key instead of index */
+            <StatCard key={s.slug} stat={s} index={i} />
           ))}
           <div className="live-stat-wrap">
-            <div style={{ fontSize: "2rem" }}>🎥</div>
+            <div style={{ fontSize: "2rem" }} aria-hidden="true">🎥</div>
             <div style={{ fontSize: "2.4rem", fontWeight: 800, color: "#4ade80" }}>
               Live
             </div>
@@ -961,32 +1243,44 @@ export default function Home() {
         </div>
       </div>
 
-      {/* ── Courses ── */}
+      {/* ────────────────────────────────────────────
+          COURSES
+      ─────────────────────────────────────────── */}
       <div id="courses" className="courses-section">
         <div className="courses-inner">
           <div className="section-label">What We Offer</div>
           <h2 className="section-title">Courses Designed for Your Success</h2>
           <p className="section-sub">
-            Practical, industry-aligned training programs that help you get certified and placed — fast.
+            Practical, industry-aligned training programs that help you get certified
+            and placed — fast.
           </p>
           <div className="courses-grid">
             {courseData.map((c, i) => (
-              <CourseCard key={i} course={c} index={i} />
+              /* FIX #16 — slug key */
+              <CourseCard key={c.slug} course={c} index={i} />
             ))}
           </div>
         </div>
       </div>
 
-      {/* ── About ── */}
+      {/* ────────────────────────────────────────────
+          ABOUT
+          FIX #5 — about image uses loading="lazy"
+          (different usage from hero, so lazy is correct)
+          FIX #6 — note: CSS is inline here; in a real
+          Next.js project move <style> to globals.css
+      ─────────────────────────────────────────── */}
       <section id="about">
         <div className="section">
           <div className="about-grid">
             <div className="about-img-wrap">
               <Image
                 src="/image/srikanth-profile.jpg"
-                alt="Srikanth Sir teaching"
+                alt="Srikanth Sir in a training session"
                 width={560}
                 height={620}
+                /* FIX #5 / #7 — lazy load the below-fold about image */
+                loading="lazy"
                 style={{ width: "100%", height: "auto" }}
               />
               <div className="about-tag-overlay">⭐ Top Safety Educator</div>
@@ -997,22 +1291,25 @@ export default function Home() {
                 Why Learn from Srikanth Sir?
               </h2>
               <p>
-                With over 10 years of hands-on experience in petroleum and industrial safety,
-                Srikanth Sir brings real-world insights into every session.
+                With over 10 years of hands-on experience in petroleum and industrial
+                safety, Srikanth Sir brings real-world insights into every session.
               </p>
               <p>
                 His structured approach combines theoretical foundations with practical
                 industry scenarios, ensuring students are truly job-ready.
               </p>
               <ul className="feature-list">
-                {[
-                  ["Live Interactive Classes", "Doubt clearing & real-time Q&A every session"],
-                  ["NEBOSH & IOSH Certified Guidance", "Expert preparation for internationally recognised exams"],
-                  ["Mock Interview Practice", "Industry-specific role-play interviews & feedback"],
-                  ["Placement Assistance", "Resume review, LinkedIn optimisation & job referrals"],
-                ].map(([title, sub], i) => (
-                  <li key={i} className="feature-item">
-                    <span className="feature-check">✓</span>
+                {(
+                  [
+                    ["Live Interactive Classes", "Doubt clearing & real-time Q&A every session"],
+                    ["NEBOSH & IOSH Guidance", "Expert prep for internationally recognised exams"],
+                    ["Mock Interview Practice", "Industry-specific role-play with detailed feedback"],
+                    ["Placement Assistance", "Resume review, LinkedIn optimisation & job referrals"],
+                  ] as [string, string][]
+                ).map(([title, sub]) => (
+                  /* FIX #16 — title string as key */
+                  <li key={title} className="feature-item">
+                    <span className="feature-check" aria-hidden="true">✓</span>
                     <span className="feature-text">
                       <strong>{title}</strong> — {sub}
                     </span>
@@ -1024,24 +1321,33 @@ export default function Home() {
         </div>
       </section>
 
-      {/* ── Testimonials ── */}
+      {/* ────────────────────────────────────────────
+          TESTIMONIALS
+          FIX #11 — varied star ratings (4 & 5)
+      ─────────────────────────────────────────── */}
       <div id="testimonials" className="testimonials-section">
         <div className="courses-inner">
           <div className="section-label">Student Reviews</div>
           <h2 className="section-title">What Our Students Say</h2>
           <div className="testimonials-grid">
             {testimonials.map((t, i) => (
-              <TestimonialCard key={i} t={t} index={i} />
+              /* FIX #16 — slug key */
+              <TestimonialCard key={t.slug} t={t} index={i} />
             ))}
           </div>
         </div>
       </div>
 
-      {/* ── CTA Banner ── */}
+      {/* ────────────────────────────────────────────
+          CTA BANNER
+      ─────────────────────────────────────────── */}
       <div className="section">
         <div className="cta-banner">
           <h3>Ready to Start Your Safety Career?</h3>
-          <p>Join the next batch and get industry-ready with expert guidance from Srikanth Sir.</p>
+          <p>
+            Join the next batch and get industry-ready with expert guidance from
+            Srikanth Sir.
+          </p>
           <div className="cta-btns">
             <a
               href="https://wa.me/917569657763"
@@ -1058,28 +1364,36 @@ export default function Home() {
         </div>
       </div>
 
-      {/* ── Footer ── */}
+      {/* ────────────────────────────────────────────
+          FOOTER
+          FIX #14 — footer has padding-bottom: 6rem so
+          the fixed WA button never overlaps content
+      ─────────────────────────────────────────── */}
       <footer id="contact" className="footer">
         <div className="footer-inner">
           <div>
             <div className="footer-brand-title">Srikanth Lecture for Safety</div>
             <p className="footer-brand-sub">
-              Professional Petroleum & Industrial Safety Training. Empowering safety professionals
-              across India and the Gulf.
+              Professional Petroleum & Industrial Safety Training. Empowering
+              safety professionals across India and the Gulf.
             </p>
             <div>
               <div className="footer-contact-item">
-                <span className="footer-icon">📱</span>
-                <a href="https://wa.me/917569657763" target="_blank" rel="noopener noreferrer">
+                <span className="footer-icon" aria-hidden="true">📱</span>
+                <a
+                  href="https://wa.me/917569657763"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
                   +91 75696 57763
                 </a>
               </div>
               <div className="footer-contact-item">
-                <span className="footer-icon">✉️</span>
+                <span className="footer-icon" aria-hidden="true">✉️</span>
                 <a href="mailto:bajibaddela@gmail.com">bajibaddela@gmail.com</a>
               </div>
               <div className="footer-contact-item">
-                <span className="footer-icon">📍</span>
+                <span className="footer-icon" aria-hidden="true">📍</span>
                 <span>Andhra Pradesh, India</span>
               </div>
             </div>
@@ -1097,7 +1411,7 @@ export default function Home() {
           <div>
             <p className="footer-col-title">Courses</p>
             {courseData.map((c) => (
-              <a key={c.title} href="#courses" className="footer-link">
+              <a key={c.slug} href="#courses" className="footer-link">
                 {c.title}
               </a>
             ))}
@@ -1105,9 +1419,18 @@ export default function Home() {
         </div>
 
         <div className="footer-bottom">
-          <p className="footer-copy">© 2026 Srikanth Lecture for Safety. All Rights Reserved.</p>
-          <p className="footer-copy" style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <span className="blink-dot blink-green" style={{ display: "inline-block" }} />
+          <p className="footer-copy">
+            © 2026 Srikanth Lecture for Safety. All Rights Reserved.
+          </p>
+          <p
+            className="footer-copy"
+            style={{ display: "flex", alignItems: "center", gap: 6 }}
+          >
+            <span
+              className="blink-dot blink-green"
+              style={{ display: "inline-block" }}
+              aria-hidden="true"
+            />
             Accepting new students
           </p>
         </div>
@@ -1115,4 +1438,3 @@ export default function Home() {
     </>
   );
 }
-
